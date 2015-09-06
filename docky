@@ -1,0 +1,20 @@
+#!/bin/sh
+if which ruby2.1 >/dev/null 2>&1; then
+    RUBY=ruby2.1
+elif which ruby2.0 >/dev/null 2>&1; then
+    RUBY=ruby2.0
+elif which ruby1.9.1 >/dev/null 2>&1; then
+    RUBY=ruby1.9.1
+elif which ruby >/dev/null 2>&1; then
+    RUBY=ruby
+    if ruby --version | grep '1.8' > /dev/null; then
+        echo "Ruby is too old!"
+        exit
+    fi
+else
+    echo "Couldn't find Ruby!"
+    exit
+fi
+
+cd $(dirname $0)
+$RUBY docky.rb "$@"
