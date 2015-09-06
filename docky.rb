@@ -79,7 +79,7 @@ def check(name)
     if $info[obj["data"]].nil?
       puts "#{name} data container #{obj["data"]} does not exist"
     else
-      puts "#{name} does not have volumes from #{obj["data"]}" unless $info[name]["HostConfig"]["VolumesFrom"].include? obj["data"]
+      puts "#{name} does not have volumes from #{obj["data"]}" unless $info[name]["HostConfig"]["VolumesFrom"] && $info[name]["HostConfig"]["VolumesFrom"].include?(obj["data"])
     end
   end
 
@@ -87,9 +87,9 @@ def check(name)
     obj["ports"].each do |port|
       a = port.split(":")
       if a.length == 1
-        p = {hostIp: "0.0.0.0", hostPort: "", containerPort: a[0]}
+        p = {hostIp: "", hostPort: "", containerPort: a[0]}
       elsif a.length == 2
-        p = {hostIp: "0.0.0.0", hostPort: a[0], containerPort: a[1]}
+        p = {hostIp: "", hostPort: a[0], containerPort: a[1]}
       elsif a.length == 3
         p = {hostIp: a[0], hostPort: a[1], containerPort: a[2]}
       else
@@ -97,8 +97,8 @@ def check(name)
         return
       end
       p[:containerPort] = p[:containerPort]+"/tcp" unless p[:containerPort].include? "/"
-      p2 = $info[name]["NetworkSettings"]["Ports"][p[:containerPort]]
-      if p2.nil? or p2[0]["HostIp"] != p[:hostIp] or p[:hostPort] != "" && p2[0]["HostPort"] != p[:hostPort]
+      p2 = $info[name]["HostConfig"]["PortBindings"][p[:containerPort]]
+      if p2.nil? or p[:hostIp] && p2[0]["HostIp"] != p[:hostIp] or p[:hostPort] != "" && p2[0]["HostPort"] != p[:hostPort]
         puts "#{name} does not have port #{port}"
       end
     end
@@ -139,9 +139,19 @@ end
 
 def launch(name)
   obj = $conf[name]
+  if obj["image"].nil?
+    puts "#{name} has no image"
+    puts "cowardly refusing to continue"
+    return
+  end
   if $info[name]
     puts "#{name} already exists! Did you mean relaunch?"
     return
+  end
+  if obj["data"] and !$info[obj["data"]]
+    str = "#{$opts['--docker']} run --name #{obj["data"]} #{obj["image"]} /bin/true"
+    puts str
+    puts `#{str}`
   end
   str = "#{$opts['--docker']} run --name #{name} -t -i -d"
   if obj["data"]
@@ -193,9 +203,9 @@ def relaunch(name)
     $conf[name]["ports"].map! do |port|
       a = port.split(":")
       if a.length == 1
-        p = {hostIp: "0.0.0.0", hostPort: "", containerPort: a[0]}
+        p = {hostIp: "", hostPort: "", containerPort: a[0]}
       elsif a.length == 2
-        p = {hostIp: "0.0.0.0", hostPort: a[0], containerPort: a[1]}
+        p = {hostIp: "", hostPort: a[0], containerPort: a[1]}
       elsif a.length == 3
         p = {hostIp: a[0], hostPort: a[1], containerPort: a[2]}
       else
@@ -203,7 +213,7 @@ def relaunch(name)
         return
       end
       p[:containerPort] = p[:containerPort]+"/tcp" unless p[:containerPort].include? "/"
-      p2 = $info[name]["NetworkSettings"]["Ports"][p[:containerPort]][0]
+      p2 = $info[name]["HostConfig"]["PortBindings"][p[:containerPort]][0]
       if p[:hostPort].empty? and !p2.nil?
         p[:hostPort] = p2["HostPort"]
       end
