@@ -21,12 +21,35 @@ def dinspect(name)
   return JSON.load(`#{$opts['--docker']} inspect #{name}`)[0]
 end
 
-def check
-  info = {}
-  images = {}
-  $opts['NAME'].each do |name|
-    info[name] = dinspect(name)
+def dinspects(names)
+  objs = JSON.load(`#{$opts['--docker']} inspect #{names.join(' ')}`)
+  h = {}
+  objs.each do |obj|
+    h[obj["Name"].sub("/","")] = obj
   end
+  h
+end
+
+def prepare
+  names = []
+  images = []
+  $opts["NAME"].each do |name|
+    names << name
+    if $conf[name]
+      obj = $conf[name]
+      images << obj["image"] if obj["image"]
+      obj["data"] = name+"-data" if obj["data"] == true
+      names << obj["data"] if obj["data"]
+    end
+  end
+  $info = dinspects(names.uniq)
+  $images = {}
+  images.uniq.each do |name|
+    $images[name] = dinspect(name)
+  end
+end
+
+def check
   $opts['NAME'].each do |name|
     obj = $conf[name]
     if obj.nil?
@@ -35,31 +58,28 @@ def check
     end
 
     if obj["enabled"] == false
-      puts "#{name} is running, should be stopped" if info[name]["State"]["Running"]
+      puts "#{name} is running, should be stopped" if $info[name]["State"]["Running"]
     else
-      puts "#{name} is stopped, should be running" unless info[name]["State"]["Running"]
+      puts "#{name} is stopped, should be running" unless $info[name]["State"]["Running"]
     end
 
     if obj["image"]
-      images[obj["image"]] = dinspect(obj["image"]) if images[obj["image"]].nil?
-      if images[obj["image"]].nil?
+      if $images[obj["image"]].nil?
         puts "#{name}: image #{obj["image"]} does not exist"
-      elsif images[obj["image"]]["Id"] != info[name]["Image"]
+      elsif $images[obj["image"]]["Id"] != $info[name]["Image"]
         puts "#{name} is not running image #{obj["image"]}"
       end
     end
 
-    obj["data"] = name+"-data" if obj["data"] == true
     if obj["data"]
-      info[obj["data"]] = dinspect(obj["data"]) if info[obj["data"]].nil?
-      if info[obj["data"]].nil?
+      if $info[obj["data"]].nil?
         puts "#{name} data container #{obj["data"]} does not exist"
       else
-        puts "#{name} does not have volumes from #{obj["data"]}" unless info[name]["HostConfig"]["VolumesFrom"].include? obj["data"]
+        puts "#{name} does not have volumes from #{obj["data"]}" unless $info[name]["HostConfig"]["VolumesFrom"].include? obj["data"]
       end
     end
 
-    unless obj["ports"].nil? or !info[name]["State"]["Running"]
+    unless obj["ports"].nil? or !$info[name]["State"]["Running"]
       obj["ports"].each do |port|
         a = port.split(":")
         if a.length == 1
@@ -73,7 +93,7 @@ def check
           next
         end
         p[:containerPort] = p[:containerPort]+"/tcp" unless p[:containerPort].include? "/"
-        p2 = info[name]["NetworkSettings"]["Ports"][p[:containerPort]]
+        p2 = $info[name]["NetworkSettings"]["Ports"][p[:containerPort]]
         if p2.nil? or p2[0]["HostIp"] != p[:hostIp] or p[:hostPort] != "" && p2[0]["HostPort"] != p[:hostPort]
           puts "#{name} does not have port #{port}"
         end
@@ -82,7 +102,7 @@ def check
 
     unless obj["env"].nil?
       obj["env"].each do |k,v|
-        unless info[name]["Config"]["Env"].include? "#{k}=#{v}"
+        unless $info[name]["Config"]["Env"].include? "#{k}=#{v}"
           puts "#{name} does not have env #{k}=#{v}"
         end
       end
@@ -93,7 +113,7 @@ def check
         exname, _, inname = link.partition(":")
         exname = "/#{exname}" unless exname.start_with? "/"
         inname = "/#{name}/#{inname}" unless inname.start_with? "/"
-        unless info[name]["HostConfig"]["Links"].include? "#{exname}:#{inname}"
+        unless $info[name]["HostConfig"]["Links"].include? "#{exname}:#{inname}"
           puts "#{name} does not have link #{link}"
         end
       end
@@ -112,6 +132,7 @@ begin
   $opts['NAME'] = $conf.keys if $opts['NAME'].empty?
 
   if $opts['check']
+    prepare
     check
   end
 rescue Docopt::Exit => e
